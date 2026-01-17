@@ -7,6 +7,15 @@ from datetime import datetime
 
 BEARER_TOKEN = os.environ.get('BEARER_TOKEN', '')
 
+print("=" * 60)
+print("🔍 调试信息")
+print("=" * 60)
+print(f"Token是否存在: {'是' if BEARER_TOKEN else '否'}")
+print(f"Token长度: {len(BEARER_TOKEN)}")
+print(f"Token前20位: {BEARER_TOKEN[:20]}...")
+print(f"Token后20位: ...{BEARER_TOKEN[-20:]}")
+print("=" * 60)
+
 if not BEARER_TOKEN:
     print("❌ 未设置 BEARER_TOKEN")
     exit(1)
@@ -26,27 +35,25 @@ def log(msg):
 
 def get_user_info():
     try:
-        r = requests.get(f"{BASE_URL}/api/user/info", headers=HEADERS, timeout=10)
-        return r.json() if r.status_code == 200 else None
-    except Exception as e:
-        log(f"❌ 错误: {e}")
-        return None
-
-def spin_wheel():
-    try:
-        r = requests.post(f"{BASE_URL}/api/checkin/spin", headers=HEADERS, timeout=10)
+        url = f"{BASE_URL}/api/user/info"
+        log(f"🔍 请求URL: {url}")
+        
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        
+        log(f"📡 状态码: {r.status_code}")
+        log(f"📄 响应头: {dict(r.headers)}")
+        log(f"📝 响应内容: {r.text}")
+        
         if r.status_code == 200:
-            data = r.json()
-            if data.get('success'):
-                log(f"✅ {data.get('message')} | 获得: {data.get('times')} | 余额: {data.get('new_balance')}")
-                return True, data.get('times', 0)
-            else:
-                log(f"⚠️ {data.get('message')}")
-                return False, 0
-        return False, 0
+            return r.json()
+        else:
+            log(f"❌ 请求失败")
+            return None
     except Exception as e:
-        log(f"❌ 异常: {e}")
-        return False, 0
+        log(f"❌ 异常: {type(e).__name__}: {e}")
+        import traceback
+        log(f"📋 详细错误:\n{traceback.format_exc()}")
+        return None
 
 def main():
     log("🎰 开始执行")
@@ -56,25 +63,8 @@ def main():
         log("❌ 无法获取用户信息")
         return
     
+    log(f"✅ 成功获取用户信息")
     log(f"👤 用户: {user.get('username')} | 💰 余额: {user.get('balance')}")
-    
-    total = 0
-    count = 0
-    
-    for i in range(3):
-        success, earned = spin_wheel()
-        if success:
-            total += earned
-            count += 1
-            time.sleep(2)
-        else:
-            break
-    
-    log(f"📊 完成！成功 {count} 次，获得 {total} 次")
-    
-    final = get_user_info()
-    if final:
-        log(f"💰 最终余额: {final.get('balance')}")
 
 if __name__ == "__main__":
     main()
