@@ -61,7 +61,7 @@ def main():
     total = 0
     count = 0
     
-    for i in range(6):
+    for i in range(3):
         success, earned = spin_wheel()
         if success:
             total += earned
