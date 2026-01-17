@@ -25,5 +25,7 @@ jobs:
     - name: 🎰 执行转盘
       env:
         BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
         python spin.py
