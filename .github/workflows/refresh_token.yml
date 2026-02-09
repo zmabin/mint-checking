@@ -1,0 +1,45 @@
+name: 刷新Token
+
+on:
+  schedule:
+    - cron: '0 0 */5 * *'  # 每5天运行一次（token有效期7天，提前2天刷新）
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  refresh-token:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v3
+
+    - name: 🐍 设置 Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 📦 安装依赖
+      run: |
+        pip install -r requirements.txt
+        playwright install chromium
+        playwright install-deps
+
+    - name: 🔄 刷新 Token
+      env:
+        LINUXDO_USERNAME: ${{ secrets.LINUXDO_USERNAME }}
+        LINUXDO_PASSWORD: ${{ secrets.LINUXDO_PASSWORD }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        python refresh_token.py
+
+    - name: 📝 提示更新 Secret
+      if: success()
+      run: |
+        echo "✅ Token 刷新成功！"
+        echo "⚠️ 请查看 Telegram 通知，手动更新 GitHub Secret 中的 BEARER_TOKEN"
+        echo ""
+        echo "更新步骤："
+        echo "1. 前往 https://github.com/${{ github.repository }}/settings/secrets/actions"
+        echo "2. 编辑 BEARER_TOKEN"
+        echo "3. 粘贴 Telegram 消息中的新 token"
