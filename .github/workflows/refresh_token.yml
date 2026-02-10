@@ -11,18 +11,24 @@ jobs:
 
     steps:
     - name: 📥 检出代码
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: 🐍 设置 Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
+
+    - name: 🌐 安装 Chrome
+      uses: browser-actions/setup-chrome@v2
+      id: setup-chrome
+      with:
+        chrome-version: stable
+        install-dependencies: true
 
     - name: 📦 安装依赖
       run: |
         pip install -r requirements.txt
-        playwright install chromium
-        playwright install-deps
+        sudo apt-get install -y xvfb
 
     - name: 🔄 刷新 Token
       env:
@@ -30,8 +36,9 @@ jobs:
         LINUXDO_PASSWORD: ${{ secrets.LINUXDO_PASSWORD }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
       run: |
-        python refresh_token.py
+        xvfb-run --auto-servernum python refresh_token.py
 
     - name: 📝 提示更新 Secret
       if: success()

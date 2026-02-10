@@ -1,2 +1,2 @@
 requests
-playwright
+DrissionPage>=4.0.0
