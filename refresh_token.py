@@ -121,14 +121,14 @@ def get_new_token():
             if "linux.do" in current_url or "discourse" in current_url:
                 log("🔐 检测到 Linux.do 登录页面，输入账号密码...")
 
-                # 输入用户名
+                # 等待登录表单加载
                 username_input = page.locator("input#login-account-name, input[name='login'], input[type='text']").first
-                username_input.fill(LINUXDO_USERNAME, timeout=10000)
+                username_input.wait_for(state="visible", timeout=10000)
+                username_input.fill(LINUXDO_USERNAME)
                 log(f"✅ 已输入用户名: {LINUXDO_USERNAME}")
 
-                # 输入密码
                 password_input = page.locator("input#login-account-password, input[name='password'], input[type='password']").first
-                password_input.fill(LINUXDO_PASSWORD, timeout=10000)
+                password_input.fill(LINUXDO_PASSWORD)
                 log("✅ 已输入密码")
 
                 # 点击登录按钮
@@ -136,20 +136,59 @@ def get_new_token():
                 submit_btn.click(timeout=10000)
                 log("🔘 已点击登录按钮")
 
-                # 等待授权页面或直接回调
-                time.sleep(3)
+                # 等待登录完成 - URL应从 /login 跳转走
+                try:
+                    page.wait_for_url(
+                        lambda url: "/login" not in url,
+                        timeout=20000
+                    )
+                    log(f"✅ 登录成功，已跳转: {page.url}")
+                except PlaywrightTimeout:
+                    # 检查是否有登录错误提示
+                    error_msg = ""
+                    try:
+                        error_el = page.locator(".alert-error, #modal-alert, .login-error").first
+                        if error_el.is_visible(timeout=2000):
+                            error_msg = error_el.text_content()
+                    except:
+                        pass
+                    if error_msg:
+                        log(f"❌ Linux.do 登录失败: {error_msg}")
+                    else:
+                        log(f"⚠️ 登录后未跳转，当前URL: {page.url}")
+                    # 截图用于调试
+                    try:
+                        page.screenshot(path="login_failed.png")
+                        log("📸 已保存登录失败截图")
+                    except:
+                        pass
+
+                time.sleep(2)
 
             # 5. 处理 OAuth 授权页面（如果有）
             current_url = page.url
-            if "authorize" in current_url or "oauth" in current_url:
-                log("🔐 检测到 OAuth 授权页面，点击授权...")
-                authorize_btn = page.locator("button:has-text('授权'), button:has-text('Authorize'), button[type='submit']").first
-                authorize_btn.click(timeout=10000)
-                log("✅ 已点击授权按钮")
+            log(f"📍 登录后 URL: {current_url}")
+
+            if "x666.me" not in current_url:
+                # 还没回调，可能在授权页面，尝试查找并点击授权按钮
+                log("🔍 检查是否有授权按钮...")
+                try:
+                    authorize_btn = page.locator(
+                        "button:has-text('授权'), button:has-text('Authorize'), "
+                        "button:has-text('允许'), button:has-text('Allow'), "
+                        ".btn-primary, button[type='submit']"
+                    ).first
+                    if authorize_btn.is_visible(timeout=5000):
+                        log("🔐 检测到授权按钮，点击授权...")
+                        authorize_btn.click(timeout=10000)
+                        log("✅ 已点击授权按钮")
+                        time.sleep(2)
+                except:
+                    log("ℹ️ 未检测到授权按钮，等待自动跳转...")
 
             # 6. 等待回调到 up.x666.me 并提取 token
             log("⏳ 等待回调...")
-            page.wait_for_url("**/x666.me/**", timeout=30000)
+            page.wait_for_url("**x666.me**", timeout=30000)
 
             # 等待页面加载完成
             time.sleep(3)
@@ -184,6 +223,13 @@ def get_new_token():
 
         except PlaywrightTimeout as e:
             log(f"❌ 超时错误: {e}")
+            try:
+                page.screenshot(path="timeout_screenshot.png")
+                log(f"📸 已保存超时截图")
+                log(f"📍 超时时URL: {page.url}")
+                log(f"📄 页面标题: {page.title()}")
+            except:
+                pass
             return None
         except Exception as e:
             log(f"❌ 发生错误: {e}")
