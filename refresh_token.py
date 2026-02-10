@@ -113,7 +113,7 @@ def get_new_token():
 
             # 3. 等待跳转到 Linux.do OAuth 授权页面
             log("⏳ 等待跳转到 Linux.do...")
-            page.wait_for_url("**/auth/**", timeout=15000)
+            page.wait_for_url("**linux.do**", timeout=15000)
             current_url = page.url
             log(f"📍 当前 URL: {current_url}")
 
