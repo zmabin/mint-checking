@@ -94,17 +94,8 @@ def get_new_token():
             # 1. 访问 up.x666.me
             log("📍 访问 up.x666.me...")
             page.goto("https://up.x666.me", wait_until="domcontentloaded", timeout=60000)
-
-            # 等待 Cloudflare 验证完成（最多等待 30 秒）
-            log("⏳ 等待 Cloudflare 验证...")
-            try:
-                # 等待页面加载完成，Cloudflare 验证通常会在几秒内完成
-                page.wait_for_load_state("networkidle", timeout=30000)
-                log("✅ Cloudflare 验证通过")
-            except PlaywrightTimeout:
-                log("⚠️ Cloudflare 验证超时，尝试继续...")
-
-            time.sleep(3)
+            page.wait_for_load_state("networkidle", timeout=15000)
+            time.sleep(2)
 
             # 2. 点击登录按钮
             log("🔘 点击登录按钮...")
@@ -117,13 +108,24 @@ def get_new_token():
             current_url = page.url
             log(f"📍 当前 URL: {current_url}")
 
-            # 4. 在 Linux.do 登录页面输入账号密码
+            # 4. 等待 Cloudflare 验证完成（Linux.do 有 Cloudflare 保护）
+            log("⏳ 等待 Cloudflare 验证...")
+            try:
+                page.wait_for_load_state("networkidle", timeout=30000)
+                log("✅ Cloudflare 验证通过")
+            except PlaywrightTimeout:
+                log("⚠️ Cloudflare 验证超时，尝试继续...")
+            time.sleep(3)
+
+            # 5. 在 Linux.do 登录页面输入账号密码
+            current_url = page.url
+            log(f"📍 验证后 URL: {current_url}")
             if "linux.do" in current_url or "discourse" in current_url:
                 log("🔐 检测到 Linux.do 登录页面，输入账号密码...")
 
                 # 等待登录表单加载
                 username_input = page.locator("input#login-account-name, input[name='login'], input[type='text']").first
-                username_input.wait_for(state="visible", timeout=10000)
+                username_input.wait_for(state="visible", timeout=15000)
                 username_input.fill(LINUXDO_USERNAME)
                 log(f"✅ 已输入用户名: {LINUXDO_USERNAME}")
 
@@ -165,7 +167,7 @@ def get_new_token():
 
                 time.sleep(2)
 
-            # 5. 处理 OAuth 授权页面（如果有）
+            # 6. 处理 OAuth 授权页面（如果有）
             current_url = page.url
             log(f"📍 登录后 URL: {current_url}")
 
@@ -186,7 +188,7 @@ def get_new_token():
                 except:
                     log("ℹ️ 未检测到授权按钮，等待自动跳转...")
 
-            # 6. 等待回调到 up.x666.me 并提取 token
+            # 7. 等待回调到 up.x666.me 并提取 token
             log("⏳ 等待回调...")
             page.wait_for_url("**x666.me**", timeout=30000)
 
