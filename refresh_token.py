@@ -73,6 +73,22 @@ def send_telegram_photo(photo_path, caption=""):
         log(f"❌ Telegram截图发送异常: {e}")
         return False
 
+def _handle_turnstile(page):
+    """检测并尝试处理 Cloudflare Turnstile 验证"""
+    try:
+        turnstile = page.locator("iframe[src*='challenges.cloudflare.com'], .cf-turnstile iframe").first
+        if turnstile.is_visible(timeout=3000):
+            log("⏳ 检测到 Cloudflare Turnstile 验证，尝试处理...")
+            turnstile_frame = turnstile.content_frame()
+            checkbox = turnstile_frame.locator("input[type='checkbox'], .ctp-checkbox-label, #challenge-stage").first
+            checkbox.click(timeout=5000)
+            log("✅ 已点击 Turnstile 验证")
+            time.sleep(5)
+        else:
+            log("ℹ️ 未检测到 Turnstile 验证")
+    except Exception:
+        log("ℹ️ 无 Turnstile 验证或已自动完成")
+
 def get_new_token():
     """通过 Playwright 自动化获取新 token"""
     log("🚀 启动浏览器自动化...")
@@ -165,16 +181,23 @@ def get_new_token():
                 password_input.fill(LINUXDO_PASSWORD)
                 log("✅ 已输入密码")
 
+                # 检查并处理 Cloudflare Turnstile（登录前可能出现）
+                _handle_turnstile(page)
+
                 # 点击登录按钮
                 submit_btn = page.locator("button#login-button").first
                 submit_btn.click(timeout=10000)
                 log("🔘 已点击登录按钮")
 
+                # 登录后可能出现 Cloudflare Turnstile 验证，等待并处理
+                time.sleep(3)
+                _handle_turnstile(page)
+
                 # 等待登录完成 - URL应从 /login 跳转走
                 try:
                     page.wait_for_url(
                         lambda url: "/login" not in url,
-                        timeout=20000
+                        timeout=60000
                     )
                     log(f"✅ 登录成功，已跳转: {page.url}")
                 except PlaywrightTimeout:
