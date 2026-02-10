@@ -108,14 +108,21 @@ def get_new_token():
             current_url = page.url
             log(f"📍 当前 URL: {current_url}")
 
-            # 4. 等待 Cloudflare 验证完成（Linux.do 有 Cloudflare 保护）
-            log("⏳ 等待 Cloudflare 验证...")
+            # 4. 等待 Cloudflare 验证完成 — 以 Discourse 登录表单出现为准
+            log("⏳ 等待 Cloudflare 验证及页面加载...")
+            login_form_locator = page.locator("input#login-account-name, input[name='login']").first
             try:
-                page.wait_for_load_state("networkidle", timeout=30000)
-                log("✅ Cloudflare 验证通过")
+                login_form_locator.wait_for(state="visible", timeout=60000)
+                log("✅ Cloudflare 验证通过，登录表单已加载")
             except PlaywrightTimeout:
-                log("⚠️ Cloudflare 验证超时，尝试继续...")
-            time.sleep(3)
+                log("❌ 登录表单未出现，可能 Cloudflare 验证未通过")
+                try:
+                    page.screenshot(path="cloudflare_blocked.png")
+                    log(f"📸 已保存截图，当前URL: {page.url}")
+                    log(f"📄 页面标题: {page.title()}")
+                except:
+                    pass
+                return None
 
             # 5. 在 Linux.do 登录页面输入账号密码
             current_url = page.url
@@ -123,18 +130,17 @@ def get_new_token():
             if "linux.do" in current_url or "discourse" in current_url:
                 log("🔐 检测到 Linux.do 登录页面，输入账号密码...")
 
-                # 等待登录表单加载
-                username_input = page.locator("input#login-account-name, input[name='login'], input[type='text']").first
-                username_input.wait_for(state="visible", timeout=15000)
-                username_input.fill(LINUXDO_USERNAME)
+                # 输入用户名
+                login_form_locator.fill(LINUXDO_USERNAME)
                 log(f"✅ 已输入用户名: {LINUXDO_USERNAME}")
 
-                password_input = page.locator("input#login-account-password, input[name='password'], input[type='password']").first
+                # 输入密码
+                password_input = page.locator("input#login-account-password, input[name='password']").first
                 password_input.fill(LINUXDO_PASSWORD)
                 log("✅ 已输入密码")
 
                 # 点击登录按钮
-                submit_btn = page.locator("button#login-button, button[type='submit'], button:has-text('登录')").first
+                submit_btn = page.locator("button#login-button").first
                 submit_btn.click(timeout=10000)
                 log("🔘 已点击登录按钮")
 
@@ -171,14 +177,13 @@ def get_new_token():
             current_url = page.url
             log(f"📍 登录后 URL: {current_url}")
 
-            if "x666.me" not in current_url:
-                # 还没回调，可能在授权页面，尝试查找并点击授权按钮
+            if "x666.me" not in current_url and "/login" not in current_url:
+                # 还没回调且不在登录页，可能在授权页面，尝试查找并点击授权按钮
                 log("🔍 检查是否有授权按钮...")
                 try:
                     authorize_btn = page.locator(
                         "button:has-text('授权'), button:has-text('Authorize'), "
-                        "button:has-text('允许'), button:has-text('Allow'), "
-                        ".btn-primary, button[type='submit']"
+                        "button:has-text('允许'), button:has-text('Allow')"
                     ).first
                     if authorize_btn.is_visible(timeout=5000):
                         log("🔐 检测到授权按钮，点击授权...")
