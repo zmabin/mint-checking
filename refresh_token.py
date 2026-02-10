@@ -48,6 +48,31 @@ def send_telegram(message):
         log(f"❌ Telegram通知异常: {e}")
         return False
 
+def send_telegram_photo(photo_path, caption=""):
+    """发送截图到Telegram"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    if not os.path.exists(photo_path):
+        return False
+
+    try:
+        import requests
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+        with open(photo_path, 'rb') as f:
+            r = requests.post(url, data={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "caption": caption,
+            }, files={"photo": f}, timeout=30)
+        if r.status_code == 200:
+            log("✅ Telegram截图发送成功")
+            return True
+        else:
+            log(f"❌ Telegram截图发送失败: {r.status_code}")
+            return False
+    except Exception as e:
+        log(f"❌ Telegram截图发送异常: {e}")
+        return False
+
 def get_new_token():
     """通过 Playwright 自动化获取新 token"""
     log("🚀 启动浏览器自动化...")
@@ -120,6 +145,7 @@ def get_new_token():
                     page.screenshot(path="cloudflare_blocked.png")
                     log(f"📸 已保存截图，当前URL: {page.url}")
                     log(f"📄 页面标题: {page.title()}")
+                    send_telegram_photo("cloudflare_blocked.png", f"Cloudflare 验证未通过\nURL: {page.url}")
                 except:
                     pass
                 return None
@@ -168,6 +194,7 @@ def get_new_token():
                     try:
                         page.screenshot(path="login_failed.png")
                         log("📸 已保存登录失败截图")
+                        send_telegram_photo("login_failed.png", f"Linux.do 登录失败\nURL: {page.url}")
                     except:
                         pass
 
@@ -235,6 +262,7 @@ def get_new_token():
                 log(f"📸 已保存超时截图")
                 log(f"📍 超时时URL: {page.url}")
                 log(f"📄 页面标题: {page.title()}")
+                send_telegram_photo("timeout_screenshot.png", f"超时错误\nURL: {page.url}\n标题: {page.title()}")
             except:
                 pass
             return None
@@ -245,6 +273,7 @@ def get_new_token():
                 screenshot_path = "error_screenshot.png"
                 page.screenshot(path=screenshot_path)
                 log(f"📸 已保存错误截图: {screenshot_path}")
+                send_telegram_photo(screenshot_path, f"发生错误: {e}")
             except:
                 pass
             return None
