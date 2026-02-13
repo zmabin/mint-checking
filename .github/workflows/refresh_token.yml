@@ -2,7 +2,7 @@ name: 刷新Token
 
 on:
   schedule:
-    - cron: '0 0 */31 * *'  # 每5天运行一次（token有效期7天，提前2天刷新）
+    - cron: '0 0 */6 * *'  # 每6天运行一次
   workflow_dispatch:  # 允许手动触发
 
 jobs:
