@@ -22,10 +22,18 @@ jobs:
       run: |
         pip install requests
     
-    - name: 🎰 执行转盘
+    - name: 🎰 执行转盘 (up.x666.me)
       env:
         BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
         python spin.py
+
+    - name: 🎁 执行转盘 (fuli.hxi.me)
+      env:
+        FULI_COOKIE: ${{ secrets.FULI_COOKIE }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        python fuli_spin.py
