@@ -193,6 +193,11 @@ def create_browser_options():
 
     return co
 
+def is_on_x666(url):
+    """判断 URL 是否真正在 up.x666.me 上（排除 query 参数中的误匹配）"""
+    return url.startswith("https://up.x666.me") or url.startswith("http://up.x666.me")
+
+
 def screenshot_and_notify(page, filename, caption):
     """截图并发送到 Telegram"""
     try:
@@ -303,7 +308,7 @@ def handle_oauth_authorize(page, timeout=15):
         url = page.url
         if "connect.linux.do" in url and "authorize" in url:
             break
-        if "x666.me" in url:
+        if is_on_x666(url):
             log("ℹ️ 已自动跳转回 up.x666.me（可能之前已授权）")
             return True
         time.sleep(0.5)
@@ -464,10 +469,10 @@ def get_new_token():
             log(f"📍 登录后 URL: {current_url}")
 
             # 登录后可能：1) 自动跳回 up.x666.me  2) 跳转到 OAuth 授权页  3) 停在 linux.do
-            if "x666.me" not in current_url:
+            if not is_on_x666(current_url):
                 if not handle_oauth_authorize(page, timeout=20):
                     # 如果没有检测到授权页也没跳回 x666.me，尝试手动导航
-                    if "x666.me" not in page.url:
+                    if not is_on_x666(page.url):
                         log("⚠️ 未自动跳转，尝试手动访问 up.x666.me...")
                         page.get("https://up.x666.me")
                         time.sleep(3)
@@ -476,7 +481,7 @@ def get_new_token():
         log("⏳ 等待回到 up.x666.me...")
         start = time.time()
         while time.time() - start < 30:
-            if "x666.me" in page.url:
+            if is_on_x666(page.url):
                 break
             time.sleep(0.5)
         else:
