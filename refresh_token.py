@@ -7,7 +7,6 @@
 import os
 import sys
 import time
-import re
 import socket
 from datetime import datetime
 from DrissionPage import ChromiumPage, ChromiumOptions
@@ -194,6 +193,203 @@ def create_browser_options():
 
     return co
 
+def screenshot_and_notify(page, filename, caption):
+    """截图并发送到 Telegram"""
+    try:
+        page.get_screenshot(path=filename)
+        log(f"📸 已保存截图: {filename}")
+        send_telegram_photo(filename, caption)
+    except Exception:
+        pass
+
+
+def login_linuxdo(page):
+    """在 Linux.do 登录页面输入账号密码并提交"""
+    log("⏳ 等待 Cloudflare 验证...")
+    if not wait_for_cf(page, timeout=120):
+        log("❌ Cloudflare 验证超时")
+        screenshot_and_notify(page, "cloudflare_blocked.png",
+                              f"Cloudflare 验证未通过\nURL: {page.url}")
+        return False
+    log("✅ Cloudflare 验证通过")
+
+    # 等待登录表单出现
+    log("⏳ 等待登录表单加载...")
+    username_input = page.ele("css:#login-account-name", timeout=30)
+    if not username_input:
+        username_input = page.ele("css:input[name='login']", timeout=10)
+
+    if not username_input:
+        # 可能 CF 通过后又跳转到了授权页（之前已有 session）
+        if "connect.linux.do" in page.url and "authorize" in page.url:
+            log("ℹ️ 已有登录 session，跳转到了授权页")
+            return True
+        log("❌ 登录表单未出现")
+        screenshot_and_notify(page, "no_login_form.png",
+                              f"登录表单未出现\nURL: {page.url}")
+        return False
+
+    log("🔐 检测到 Linux.do 登录页面，输入账号密码...")
+
+    # 输入用户名
+    username_input.clear()
+    username_input.input(LINUXDO_USERNAME)
+    log(f"✅ 已输入用户名: {LINUXDO_USERNAME}")
+
+    # 输入密码
+    password_input = page.ele("css:#login-account-password", timeout=10)
+    if not password_input:
+        password_input = page.ele("css:input[name='password']", timeout=5)
+
+    if password_input:
+        password_input.clear()
+        password_input.input(LINUXDO_PASSWORD)
+        log("✅ 已输入密码")
+    else:
+        log("❌ 未找到密码输入框")
+        return False
+
+    time.sleep(1)
+
+    # 点击登录按钮
+    submit_btn = page.ele("css:#login-button", timeout=10)
+    if submit_btn:
+        submit_btn.click()
+        log("🔘 已点击 Linux.do 登录按钮")
+    else:
+        log("❌ 未找到登录提交按钮")
+        return False
+
+    # 登录后等待并处理可能出现的 Cloudflare Turnstile
+    time.sleep(3)
+    wait_for_cf(page, timeout=30)
+
+    # 等待 URL 离开 /login（可能跳转到 linux.do 首页、OAuth 授权页、或 up.x666.me）
+    log("⏳ 等待登录完成...")
+    start = time.time()
+    while time.time() - start < 60:
+        url = page.url
+        if "/login" not in url:
+            log(f"✅ 登录成功，已跳转: {url}")
+            return True
+        time.sleep(1)
+
+    # 检查是否有登录错误提示
+    error_msg = ""
+    try:
+        error_el = page.ele("css:.alert-error, #modal-alert, .login-error", timeout=2)
+        if error_el:
+            error_msg = error_el.text
+    except Exception:
+        pass
+
+    if error_msg:
+        log(f"❌ Linux.do 登录失败: {error_msg}")
+    else:
+        log(f"⚠️ 登录后未跳转，当前URL: {page.url}")
+
+    screenshot_and_notify(page, "login_failed.png",
+                          f"Linux.do 登录失败\nURL: {page.url}\n{error_msg}")
+    return False
+
+
+def handle_oauth_authorize(page, timeout=15):
+    """处理 connect.linux.do OAuth 授权页面，点击「允许」按钮"""
+    log("🔍 检查 OAuth 授权页面...")
+
+    # 等待可能跳转到授权页
+    start = time.time()
+    while time.time() - start < timeout:
+        url = page.url
+        if "connect.linux.do" in url and "authorize" in url:
+            break
+        if "x666.me" in url:
+            log("ℹ️ 已自动跳转回 up.x666.me（可能之前已授权）")
+            return True
+        time.sleep(0.5)
+    else:
+        log(f"⚠️ 未检测到授权页面，当前URL: {page.url}")
+        return False
+
+    log("🔐 检测到 OAuth 授权页面")
+
+    # 点击「允许」按钮
+    authorize_btn = None
+    for text in ["允许", "授权", "Authorize", "Allow"]:
+        authorize_btn = page.ele(f"text:{text}", timeout=3)
+        if authorize_btn:
+            break
+
+    if authorize_btn:
+        authorize_btn.click()
+        log("✅ 已点击允许按钮")
+        time.sleep(2)
+        return True
+    else:
+        log("❌ 未找到授权/允许按钮")
+        screenshot_and_notify(page, "no_authorize_btn.png",
+                              f"未找到授权按钮\nURL: {page.url}")
+        return False
+
+
+def extract_token_from_network(page, timeout=15):
+    """从监听的网络请求中提取 Bearer Token"""
+    log("⏳ 等待 status 请求以提取 token...")
+    try:
+        packet = page.listen.wait(timeout=timeout)
+        if packet:
+            # 从请求头中提取 Authorization
+            auth_header = ""
+            if hasattr(packet, 'request') and packet.request:
+                headers = packet.request.headers
+                if isinstance(headers, dict):
+                    auth_header = headers.get('Authorization', '') or headers.get('authorization', '')
+            if auth_header.startswith('Bearer '):
+                token = auth_header[7:]
+                log(f"✅ 从网络请求提取到 token: {token[:20]}...")
+                return token
+            else:
+                log(f"⚠️ status 请求中无 Bearer token，Authorization: {auth_header[:50] if auth_header else '(空)'}")
+    except Exception as e:
+        log(f"⚠️ 网络监听提取失败: {e}")
+    return None
+
+
+def extract_token_from_storage(page):
+    """从 localStorage / sessionStorage / cookie 中提取 token"""
+    # 尝试多种常见的存储 key
+    js_code = """
+    // 尝试 localStorage
+    var keys = ['userToken', 'token', 'bearer_token', 'access_token', 'auth_token', 'jwt'];
+    for (var i = 0; i < keys.length; i++) {
+        var v = localStorage.getItem(keys[i]);
+        if (v && v.length > 20) return v;
+    }
+    // 尝试 sessionStorage
+    for (var i = 0; i < keys.length; i++) {
+        var v = sessionStorage.getItem(keys[i]);
+        if (v && v.length > 20) return v;
+    }
+    // 遍历 localStorage 寻找 JWT 格式的值
+    for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        var v = localStorage.getItem(k);
+        if (v && v.startsWith('eyJ') && v.length > 50) return v;
+    }
+    // 遍历 sessionStorage
+    for (var i = 0; i < sessionStorage.length; i++) {
+        var k = sessionStorage.key(i);
+        var v = sessionStorage.getItem(k);
+        if (v && v.startsWith('eyJ') && v.length > 50) return v;
+    }
+    return null;
+    """
+    token = page.run_js(js_code)
+    if token:
+        log(f"✅ 从浏览器存储提取到 token: {token[:20]}...")
+    return token
+
+
 def get_new_token():
     """通过 DrissionPage 自动化获取新 token"""
     log("🚀 启动浏览器自动化...")
@@ -214,228 +410,123 @@ def get_new_token():
             time.sleep(3)
 
     try:
-        # 1. 访问 up.x666.me
+        # 开始监听 up.x666.me 的 status 请求（用于提取 token）
+        page.listen.start('up.x666.me')
+
+        # ===== 第一步：访问 up.x666.me 并点击登录 =====
         log("📍 访问 up.x666.me...")
         page.get("https://up.x666.me")
         time.sleep(3)
 
-        # 2. 点击登录按钮
         log("🔘 点击登录按钮...")
-        login_btn = page.ele("css:button.login-btn", timeout=10)
+        login_btn = page.ele("text:登录", timeout=10)
         if not login_btn:
-            login_btn = page.ele("text:登录", timeout=5)
+            login_btn = page.ele("css:button.login-btn", timeout=5)
         if login_btn:
             login_btn.click()
             log("✅ 已点击登录按钮")
         else:
             log("❌ 未找到登录按钮")
-            try:
-                page.get_screenshot(path="no_login_btn.png")
-                send_telegram_photo("no_login_btn.png", f"未找到登录按钮\nURL: {page.url}")
-            except Exception:
-                pass
+            screenshot_and_notify(page, "no_login_btn.png",
+                                  f"未找到登录按钮\nURL: {page.url}")
             return None
 
-        # 3. 等待跳转到 Linux.do
-        log("⏳ 等待跳转到 Linux.do...")
+        # ===== 第二步：等待跳转（linux.do 登录页 或 connect.linux.do 授权页）=====
+        log("⏳ 等待页面跳转...")
         start = time.time()
         while time.time() - start < 15:
-            if "linux.do" in page.url:
+            url = page.url
+            if "linux.do" in url:
                 break
             time.sleep(0.5)
         else:
             log(f"❌ 未跳转到 Linux.do，当前URL: {page.url}")
-            try:
-                page.get_screenshot(path="no_redirect.png")
-                send_telegram_photo("no_redirect.png", f"未跳转到 Linux.do\nURL: {page.url}")
-            except Exception:
-                pass
+            screenshot_and_notify(page, "no_redirect.png",
+                                  f"未跳转到 Linux.do\nURL: {page.url}")
             return None
 
         current_url = page.url
-        log(f"📍 当前 URL: {current_url}")
+        log(f"📍 跳转到: {current_url}")
 
-        # 4. 等待 Cloudflare 验证完成
-        log("⏳ 等待 Cloudflare 验证...")
-        if not wait_for_cf(page, timeout=120):
-            log("❌ Cloudflare 验证超时")
-            try:
-                page.get_screenshot(path="cloudflare_blocked.png")
-                log(f"📸 已保存截图，当前URL: {page.url}")
-                log(f"📄 页面标题: {page.title}")
-                send_telegram_photo("cloudflare_blocked.png", f"Cloudflare 验证未通过\nURL: {page.url}")
-            except Exception:
-                pass
-            return None
-        log("✅ Cloudflare 验证通过")
-
-        # 5. 等待登录表单出现
-        log("⏳ 等待登录表单加载...")
-        username_input = page.ele("css:#login-account-name", timeout=30)
-        if not username_input:
-            username_input = page.ele("css:input[name='login']", timeout=10)
-
-        if not username_input:
-            log("❌ 登录表单未出现")
-            try:
-                page.get_screenshot(path="no_login_form.png")
-                send_telegram_photo("no_login_form.png", f"登录表单未出现\nURL: {page.url}")
-            except Exception:
-                pass
-            return None
-
-        # 6. 输入用户名和密码
-        current_url = page.url
-        log(f"📍 验证后 URL: {current_url}")
-
-        if "linux.do" in current_url or "discourse" in current_url:
-            log("🔐 检测到 Linux.do 登录页面，输入账号密码...")
-
-            # 输入用户名
-            username_input.clear()
-            username_input.input(LINUXDO_USERNAME)
-            log(f"✅ 已输入用户名: {LINUXDO_USERNAME}")
-
-            # 输入密码
-            password_input = page.ele("css:#login-account-password", timeout=10)
-            if not password_input:
-                password_input = page.ele("css:input[name='password']", timeout=5)
-
-            if password_input:
-                password_input.clear()
-                password_input.input(LINUXDO_PASSWORD)
-                log("✅ 已输入密码")
-            else:
-                log("❌ 未找到密码输入框")
+        # ===== 第三步：根据跳转目标分别处理 =====
+        if "connect.linux.do" in current_url and "authorize" in current_url:
+            # 已有 Linux.do session，直接到了 OAuth 授权页
+            log("ℹ️ 已有 Linux.do session，直接进入授权页")
+            if not handle_oauth_authorize(page, timeout=15):
                 return None
-
-            time.sleep(1)
-
-            # 点击登录按钮
-            submit_btn = page.ele("css:#login-button", timeout=10)
-            if submit_btn:
-                submit_btn.click()
-                log("🔘 已点击登录按钮")
-            else:
-                log("❌ 未找到登录提交按钮")
+        else:
+            # 需要先登录 Linux.do
+            if not login_linuxdo(page):
                 return None
-
-            # 登录后等待并处理可能出现的 Cloudflare Turnstile
-            time.sleep(3)
-            wait_for_cf(page, timeout=30)
-
-            # 等待 URL 离开 /login
-            log("⏳ 等待登录完成...")
-            start = time.time()
-            while time.time() - start < 60:
-                if "/login" not in page.url:
-                    log(f"✅ 登录成功，已跳转: {page.url}")
-                    break
-                time.sleep(1)
-            else:
-                # 检查是否有登录错误提示
-                error_msg = ""
-                try:
-                    error_el = page.ele("css:.alert-error, #modal-alert, .login-error", timeout=2)
-                    if error_el:
-                        error_msg = error_el.text
-                except Exception:
-                    pass
-
-                if error_msg:
-                    log(f"❌ Linux.do 登录失败: {error_msg}")
-                else:
-                    log(f"⚠️ 登录后未跳转，当前URL: {page.url}")
-
-                try:
-                    page.get_screenshot(path="login_failed.png")
-                    log("📸 已保存登录失败截图")
-                    send_telegram_photo("login_failed.png", f"Linux.do 登录失败\nURL: {page.url}")
-                except Exception:
-                    pass
 
             time.sleep(2)
+            current_url = page.url
+            log(f"📍 登录后 URL: {current_url}")
 
-        # 7. 处理 OAuth 授权页面（如果有）
-        current_url = page.url
-        log(f"📍 登录后 URL: {current_url}")
+            # 登录后可能：1) 自动跳回 up.x666.me  2) 跳转到 OAuth 授权页  3) 停在 linux.do
+            if "x666.me" not in current_url:
+                if not handle_oauth_authorize(page, timeout=20):
+                    # 如果没有检测到授权页也没跳回 x666.me，尝试手动导航
+                    if "x666.me" not in page.url:
+                        log("⚠️ 未自动跳转，尝试手动访问 up.x666.me...")
+                        page.get("https://up.x666.me")
+                        time.sleep(3)
 
-        if "x666.me" not in current_url and "/login" not in current_url:
-            log("🔍 检查是否有授权按钮...")
-            try:
-                authorize_btn = page.ele("text:授权", timeout=5)
-                if not authorize_btn:
-                    authorize_btn = page.ele("text:Authorize", timeout=2)
-                if not authorize_btn:
-                    authorize_btn = page.ele("text:允许", timeout=2)
-                if not authorize_btn:
-                    authorize_btn = page.ele("text:Allow", timeout=2)
-
-                if authorize_btn:
-                    log("🔐 检测到授权按钮，点击授权...")
-                    authorize_btn.click()
-                    log("✅ 已点击授权按钮")
-                    time.sleep(2)
-                else:
-                    log("ℹ️ 未检测到授权按钮，等待自动跳转...")
-            except Exception:
-                log("ℹ️ 未检测到授权按钮，等待自动跳转...")
-
-        # 8. 等待回调到 up.x666.me 并提取 token
-        log("⏳ 等待回调...")
+        # ===== 第四步：等待回到 up.x666.me =====
+        log("⏳ 等待回到 up.x666.me...")
         start = time.time()
         while time.time() - start < 30:
             if "x666.me" in page.url:
                 break
             time.sleep(0.5)
         else:
-            log(f"❌ 回调超时，当前URL: {page.url}")
-            try:
-                page.get_screenshot(path="callback_timeout.png")
-                send_telegram_photo("callback_timeout.png", f"回调超时\nURL: {page.url}")
-            except Exception:
-                pass
+            log(f"❌ 未回到 up.x666.me，当前URL: {page.url}")
+            screenshot_and_notify(page, "callback_timeout.png",
+                                  f"回调超时\nURL: {page.url}")
             return None
 
-        # 等待页面加载完成
-        time.sleep(3)
+        log(f"✅ 已回到 up.x666.me: {page.url}")
 
-        # 从 URL 参数或 localStorage 提取 token
-        final_url = page.url
-        log(f"📍 回调 URL: {final_url}")
-
-        # 方法1: 从 URL 参数提取
-        token_match = re.search(r'[?&]token=([^&]+)', final_url)
-        if token_match:
-            token = token_match.group(1)
-            log(f"✅ 从 URL 提取到 token: {token[:20]}...")
-            return token
-
-        # 方法2: 从 localStorage 提取
-        token = page.run_js("return localStorage.getItem('userToken')")
-        if token:
-            log(f"✅ 从 localStorage 提取到 token: {token[:20]}...")
-            return token
-
-        # 方法3: 等待并重试
-        log("⏳ Token 未立即出现，等待 5 秒后重试...")
+        # 等待页面加载，触发 status 等 API 请求
         time.sleep(5)
-        token = page.run_js("return localStorage.getItem('userToken')")
+
+        # ===== 第五步：提取 token =====
+        # 方法1: 从监听到的网络请求 Authorization header 提取
+        token = extract_token_from_network(page, timeout=10)
         if token:
-            log(f"✅ 从 localStorage 提取到 token: {token[:20]}...")
+            return token
+
+        # 方法2: 从浏览器存储中提取
+        token = extract_token_from_storage(page)
+        if token:
+            return token
+
+        # 方法3: 刷新页面再次尝试捕获
+        log("⏳ 刷新页面重试...")
+        page.listen.start('up.x666.me')
+        page.refresh()
+        time.sleep(5)
+
+        token = extract_token_from_network(page, timeout=10)
+        if token:
+            return token
+
+        token = extract_token_from_storage(page)
+        if token:
             return token
 
         log("❌ 未能提取到 token")
+        screenshot_and_notify(page, "no_token.png",
+                              f"登录成功但未提取到 token\nURL: {page.url}")
         return None
 
     except Exception as e:
         log(f"❌ 发生错误: {e}")
         try:
-            page.get_screenshot(path="error_screenshot.png")
-            log(f"📸 已保存错误截图")
+            screenshot_and_notify(page, "error_screenshot.png",
+                                  f"发生错误: {e}\nURL: {page.url}")
             log(f"📍 错误时URL: {page.url}")
             log(f"📄 页面标题: {page.title}")
-            send_telegram_photo("error_screenshot.png", f"发生错误: {e}\nURL: {page.url}")
         except Exception:
             pass
         return None
